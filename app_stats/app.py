@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
+import openpyxl
+from openpyxl.formatting.rule import ColorScaleRule
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.utils import get_column_letter
 
 st.set_page_config(
     page_title="Estadísticas Mi Equipo CAB",
@@ -16,7 +20,6 @@ def parse_match_excel(uploaded_file):
     equipo_actual = None
     filas = []
 
-    # Palabras clave a ignorar en Columna 0 que no corresponden a nombres de equipos
     palabras_ignorar = [
         "ESTADÍSTICAS", "CONFEDERACIÓN", "NUM.", "TOTALES", "CABB", 
         "NAN", "NONE", "HOJA", "FECHA", "CANCHA", "ARBITROS"
@@ -26,15 +29,12 @@ def parse_match_excel(uploaded_file):
         val0 = str(row[0]).strip() if pd.notna(row[0]) else ""
         val1 = str(row[1]).strip() if pd.notna(row[1]) else ""
 
-        # Detección genérica de cabecera de Equipo:
-        # Columna 0 tiene texto, Columna 1 está vacía, y no contiene ninguna de las palabras reservadas.
         if val0 != "" and val1 in ["", "nan", "None"]:
             es_palabra_reservada = any(p in val0.upper() for p in palabras_ignorar)
             if not es_palabra_reservada:
                 equipo_actual = val0
                 continue
 
-        # Filtrar filas de jugadoras (evitando TOTALES, encabezados y filas vacías)
         if val0 != "" and val0.upper() != "NUM." and val1.upper() not in ["TOTALES", "NOMBRE", "NAN", ""] and pd.notna(row[1]):
             if equipo_actual is not None:
                 min_str = str(row[2]).strip()
@@ -147,6 +147,49 @@ def consolidar_estadisticas(df_total):
 
     return df_res
 
+def generar_excel_estilizado(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Estadisticas 2026', index=False)
+    
+    output.seek(0)
+    wb = openpyxl.load_workbook(output)
+    ws = wb.active
+    
+    # 1. Estilo de Encabezados (Gris oscuro con texto blanco)
+    header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+    # 2. Escala de color en degradé verde
+    green_scale = ColorScaleRule(
+        start_type='min', start_color='E8F5E9',
+        end_type='max', end_color='43A047'
+    )
+    
+    max_row = ws.max_row
+    max_col = ws.max_column
+    
+    if max_row > 2:
+        for col_idx in range(3, max_col + 1):
+            col_letter = get_column_letter(col_idx)
+            cell_range = f"{col_letter}2:{col_letter}{max_row}"
+            ws.conditional_formatting.add(cell_range, green_scale)
+            
+    # 3. Autoajustar ancho de las columnas
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
+        
+    final_output = io.BytesIO()
+    wb.save(final_output)
+    final_output.seek(0)
+    return final_output
+
 uploaded_files = st.file_uploader(
     "Seleccioná o arrastrá las planillas (.xlsx):",
     type=["xlsx"],
@@ -204,15 +247,17 @@ if uploaded_files:
             column_config=col_config
         )
 
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df_filtrado.to_excel(writer, sheet_name='Estadisticas 2026', index=False)
-        buffer.seek(0)
+        excel_buffer = generar_excel_estilizado(df_filtrado)
+
+        nombre_archivo = "Stats_MiEquipo_2026.xlsx"
+        if equipo_sel != "TODOS LOS EQUIPOS":
+            nombre_limpio = equipo_sel.replace(" ", "_").replace("'", "")
+            nombre_archivo = f"Stats_{nombre_limpio}_2026.xlsx"
 
         st.download_button(
-            label="📥 Descargar Excel",
-            data=buffer,
-            file_name="Stats_Consolidadas_2026.xlsx",
+            label="🎨 Descargar Excel con Colores",
+            data=excel_buffer,
+            file_name=nombre_archivo,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 else:
