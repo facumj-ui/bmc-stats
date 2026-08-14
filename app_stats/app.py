@@ -249,7 +249,7 @@ if uploaded_files:
         ]
 
         columnas_visibles = st.multiselect(
-            "Seleccionar columnas que querés ver y descargar:",
+            "Seleccionar columnas que querés ver:",
             options=todas_columnas,
             default=[c for c in cols_default if c in todas_columnas]
         )
@@ -291,7 +291,7 @@ if uploaded_files:
             nombre_archivo = f"Stats_{nombre_limpio}_2026.xlsx"
 
         st.download_button(
-            label="📥 Descargar Excel con Selección Actual",
+            label="📥 Descargar Excel",
             data=excel_buffer,
             file_name=nombre_archivo,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
