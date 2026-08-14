@@ -4,7 +4,7 @@ import numpy as np
 import io
 import openpyxl
 from openpyxl.formatting.rule import ColorScaleRule
-from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(
@@ -141,10 +141,8 @@ def consolidar_estadisticas(df_total):
     ]
     
     df_res = grouped[cols_order].sort_values(by="PTS", ascending=False)
-    
     columnas_float = df_res.select_dtypes(include=['float64', 'float32']).columns
     df_res[columnas_float] = df_res[columnas_float].round(2)
-
     return df_res
 
 def generar_excel_estilizado(df):
@@ -156,34 +154,55 @@ def generar_excel_estilizado(df):
     wb = openpyxl.load_workbook(output)
     ws = wb.active
     
-    # 1. Estilo de Encabezados (Gris oscuro con texto blanco)
-    header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
-    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    # 1. Encabezados estilo moderno
+    header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+    
     for cell in ws[1]:
         cell.fill = header_fill
         cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-    # 2. Escala de color en degradé verde
-    green_scale = ColorScaleRule(
-        start_type='min', start_color='E8F5E9',
-        end_type='max', end_color='43A047'
-    )
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
     
+    # 2. Alineación y bordes
+    data_font = Font(name="Segoe UI", size=10)
     max_row = ws.max_row
     max_col = ws.max_column
+
+    for row in ws.iter_rows(min_row=2, max_row=max_row, min_col=1, max_col=max_col):
+        for cell in row:
+            cell.font = data_font
+            cell.border = thin_border
+            if cell.column in [1, 2]:
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+            else:
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # 3. Degradé suave de verdes
+    green_scale = ColorScaleRule(
+        start_type='min', start_color='F0FDF4',
+        end_type='max', end_color='86EFAC'
+    )
     
     if max_row > 2:
-        for col_idx in range(3, max_col + 1):
-            col_letter = get_column_letter(col_idx)
-            cell_range = f"{col_letter}2:{col_letter}{max_row}"
-            ws.conditional_formatting.add(cell_range, green_scale)
+        for col_idx in range(1, max_col + 1):
+            col_name = str(ws.cell(row=1, column=col_idx).value)
+            if col_name not in ['Equipo', 'Nombre']:
+                col_letter = get_column_letter(col_idx)
+                cell_range = f"{col_letter}2:{col_letter}{max_row}"
+                ws.conditional_formatting.add(cell_range, green_scale)
             
-    # 3. Autoajustar ancho de las columnas
+    # 4. Ancho automático
     for col in ws.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = get_column_letter(col[0].column)
-        ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 10)
         
     final_output = io.BytesIO()
     wb.save(final_output)
@@ -211,11 +230,10 @@ if uploaded_files:
         df_consolidado = consolidar_estadisticas(df_total)
 
         st.success(f"¡Se procesaron {len(uploaded_files)} planillas correctamente!")
-
         st.markdown("### 📊 Tabla de Estadísticas")
 
+        # --- FILTROS DE EQUIPO Y BÚSQUEDA ---
         col1, col2 = st.columns([1, 1])
-        
         equipos = ["TODOS LOS EQUIPOS"] + sorted(list(df_consolidado["Equipo"].unique()))
         
         with col1:
@@ -223,17 +241,34 @@ if uploaded_files:
         with col2:
             busqueda_nombre = st.text_input("Buscar Jugadora/Jugador por Nombre:", "")
 
-        df_filtrado = df_consolidado.copy()
+        # --- SELECTOR DE COLUMNAS ACTIVAS ---
+        todas_columnas = list(df_consolidado.columns)
+        cols_default = [
+            "Equipo", "Nombre", "PJ", "MIN", "PTS", "T2%", "T3%", "T1%", "TC%", 
+            "PLAYS", "PPP", "TO%", "RT", "AST", "VAL"
+        ]
+
+        columnas_visibles = st.multiselect(
+            "Seleccionar columnas que querés ver y descargar:",
+            options=todas_columnas,
+            default=[c for c in cols_default if c in todas_columnas]
+        )
+
+        if not columnas_visibles:
+            columnas_visibles = todas_columnas
+
+        # Filtrar exactamente las columnas elegidas
+        df_filtrado = df_consolidado[columnas_visibles].copy()
         
-        if equipo_sel != "TODOS LOS EQUIPOS":
+        if equipo_sel != "TODOS LOS EQUIPOS" and "Equipo" in df_filtrado.columns:
             df_filtrado = df_filtrado[df_filtrado["Equipo"] == equipo_sel]
             
-        if busqueda_nombre.strip():
+        if busqueda_nombre.strip() and "Nombre" in df_filtrado.columns:
             df_filtrado = df_filtrado[
                 df_filtrado["Nombre"].str.contains(busqueda_nombre, case=False, na=False)
             ]
 
-        st.caption(f"Mostrando **{len(df_filtrado)}** jugadoras/es de **{len(df_consolidado)}** totales.")
+        st.caption(f"Mostrando **{len(df_filtrado)}** registros con **{len(columnas_visibles)}** columnas seleccionadas.")
 
         col_config = {}
         columnas_float = df_filtrado.select_dtypes(include=['float64', 'float32']).columns
@@ -243,10 +278,11 @@ if uploaded_files:
         st.dataframe(
             df_filtrado,
             use_container_width=True,
-            height=550,
+            height=520,
             column_config=col_config
         )
 
+        # Generar el Excel con exactamente las mismas columnas y equipo filtrado
         excel_buffer = generar_excel_estilizado(df_filtrado)
 
         nombre_archivo = "Stats_MiEquipo_2026.xlsx"
@@ -255,7 +291,7 @@ if uploaded_files:
             nombre_archivo = f"Stats_{nombre_limpio}_2026.xlsx"
 
         st.download_button(
-            label="🎨 Descargar Excel con Colores",
+            label="📥 Descargar Excel con Selección Actual",
             data=excel_buffer,
             file_name=nombre_archivo,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
